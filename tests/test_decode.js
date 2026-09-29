@@ -24,9 +24,10 @@ function readPPM(file) {
   const px = buf.slice(off); // 每个 token 后均以空白结束, 光栅数据紧随其后
   const data = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
-    data[i * 4] = px[i * 3];
-    data[i * 4 + 1] = px[i * 3 + 1];
-    data[i * 4 + 2] = px[i * 3 + 2];
+    // 反相: 模拟终端黑底白码(真实屏幕方向), 与接收页 onlyInvert 解码一致
+    data[i * 4] = 255 - px[i * 3];
+    data[i * 4 + 1] = 255 - px[i * 3 + 1];
+    data[i * 4 + 2] = 255 - px[i * 3 + 2];
     data[i * 4 + 3] = 255;
   }
   return { data, width: w, height: h };
@@ -39,7 +40,7 @@ let total = null;
 
 for (const f of files) {
   const { data, width, height } = readPPM(path.join(dir, f));
-  const q = jsQR(data, width, height, { inversionAttempts: 'dontInvert' });
+  const q = jsQR(data, width, height, { inversionAttempts: 'invertFirst' });
   if (!q || !q.binaryData) { console.error('解码失败: ' + f); process.exit(1); }
   const bin = q.binaryData;
   // 手动读大端 (jsQR 的 binaryData 可能是普通数组, 不能用 DataView)

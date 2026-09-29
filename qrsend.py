@@ -192,20 +192,26 @@ def main():
         print('帧已导出到 %s (调试模式, 到此结束)' % args.dump)
         sys.exit(0)
 
-    # 引导码: 手机扫它直达接收页
-    guide = qrcode.QRCode(error_correction=ERROR_CORRECT_M, border=2)
-    guide.add_data(args.receiver)
-    guide.make(fit=True)
+    # 引导码: 手机扫它直达接收页 (终端太矮放不下时就只显示地址)
     print('\033[2J\033[H')
     print('\033[1m====== 第一步: 手机打开接收页 ======\033[0m')
-    print('接收页地址: \033[1;34m%s\033[0m' % args.receiver)
-    print('用 iPhone 相机或微信扫下面的引导码, 在打开的页面点「开始接收」:')
-    for l in render(guide.get_matrix()):
-        print(l)
+    print('地址: \033[1;34m%s\033[0m' % args.receiver)
+    print('(手机浏览器直接输上面的地址, 或扫下面的引导码)')
+    guide_lines = None
+    try:
+        guide = qrcode.QRCode(error_correction=ERROR_CORRECT_M, border=0)
+        guide.add_data(args.receiver)
+        guide.make(fit=True)
+        guide_lines = render(guide.get_matrix())
+    except Exception:
+        pass
+    if guide_lines and len(guide_lines) + 5 <= lines:
+        for l in guide_lines:
+            print(l)
+    else:
+        print('(屏幕高度不够显示引导码, 请在手机浏览器手动输入地址)')
     print()
-    input('\033[1m手机准备好后, 回到这里按回车开始播放\033[0m')
-    print('(保持接收页在前台, 屏幕调亮; 接收完成后按 Ctrl-C 停止)')
-    time.sleep(1)
+    input('\033[1m手机打开接收页并点「开始接收」后, 回到这里按回车开始播放\033[0m')
     play(frames, args.fps, fname)
 
 

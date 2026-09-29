@@ -10172,6 +10172,7 @@ function crc32(u8) {
 var frames = {};        // index -> Uint8Array(数据区)
 var total = null;
 var received = 0;
+var badFrames = 0;      // 识别到二维码但校验失败的帧数(诊断用)
 var started = false;
 var done = false;
 
@@ -10196,7 +10197,10 @@ function handleFrame(bin) {
   var t = u16(bin, 4), idx = u16(bin, 6), len = u16(bin, 8);
   if (bin.length < HEADER_LEN + len) return;
   var data = new Uint8Array(bin.slice(HEADER_LEN, HEADER_LEN + len));
-  if (crc32(data) !== u32(bin, 10)) return; // 校验失败, 丢弃该帧
+  if (crc32(data) !== u32(bin, 10)) {   // 校验失败, 丢弃该帧并计数
+    badFrames++;
+    return;
+  }
 
   if (total === null) {
     total = t;
@@ -10207,7 +10211,8 @@ function handleFrame(bin) {
   frames[idx] = data;
   received++;
   progressEl.value = received;
-  setStatus('接收中 ' + received + '/' + total + ' 帧');
+  setStatus('接收中 ' + received + '/' + total + ' 帧' +
+            (badFrames > 0 ? ' (校验失败 ' + badFrames + ')' : ''));
   if (received >= total) finish();
 }
 
@@ -10266,7 +10271,8 @@ function startScan() {
         canvas.width = w; canvas.height = h;
         ctx.drawImage(video, 0, 0, w, h);
         var img = ctx.getImageData(0, 0, w, h);
-        var q = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
+        // 终端渲染的是黑底白码, 首试反转方向; jsQR 1.4 的 onlyInvert 有 bug, 用 invertFirst
+        var q = jsQR(img.data, w, h, { inversionAttempts: 'invertFirst' });
         if (q && q.binaryData) handleFrame(q.binaryData);
       }
       requestAnimationFrame(tick);
