@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>二维码收文件</title>
+<style>
+  html,body{margin:0;padding:0;background:#111;color:#eee;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;}
+  #wrap{max-width:640px;margin:0 auto;padding:16px;}
+  h1{font-size:20px;margin:8px 0 4px;text-align:center;}
+  #status{text-align:center;color:#9cf;min-height:1.4em;margin:8px 0;font-size:15px;}
+  #progress{display:block;width:100%;height:24px;margin:12px 0;
+    -webkit-appearance:none;appearance:none;border-radius:12px;overflow:hidden;background:#333;}
+  #progress::-webkit-progress-bar{background:#333;}
+  #progress::-webkit-progress-value{background:#3c6;border-radius:12px;}
+  video{display:block;width:100%;border-radius:8px;background:#000;}
+  #hint{color:#888;font-size:13px;margin:10px 0;line-height:1.5;}
+  button{display:block;width:100%;padding:16px;font-size:18px;border:0;border-radius:10px;
+    background:#3c6;color:#fff;margin:10px 0;}
+  button:disabled{background:#444;color:#888;}
+  #save{display:none;background:#06c;}
+  #fileinfo{text-align:center;font-size:15px;margin:6px 0;color:#ffa;}
+  #fail{color:#f66;text-align:center;font-size:14px;display:none;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>二维码收文件</h1>
+  <div id="status">未开始</div>
+  <video id="v" playsinline autoplay muted></video>
+  <progress id="progress" max="100" value="0"></progress>
+  <div id="fileinfo"></div>
+  <button id="start">开始接收</button>
+  <a id="save" href="#" download=""><button>保存文件</button></a>
+  <div id="hint">
+    使用方法:<br>
+    1. 电脑终端运行 qrsend.py 并开始播放二维码<br>
+    2. 点「开始接收」授权相机, 对准电脑屏幕<br>
+    3. 进度到 100% 后自动保存文件<br>
+    · 请保持本页面在前台, 屏幕调亮<br>
+    · 电脑侧会循环播放, 手机收齐即完成, 电脑按 Ctrl-C 停止
+  </div>
+  <div id="fail"></div>
+</div>
+<script>
+/*__JSQR__*/
+</script>
+<script>
+'use strict';
+var HEADER_LEN = 14;
+var MAGIC = 0x51534631; // 'QSF1'
+
+// ---------- CRC32 ----------
+var CRC_TABLE = (function () {
+  var t = new Uint32Array(256);
+  for (var n = 0; n < 256; n++) {
+    var c = n;
+    for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ---------- 状态 ----------
+var frames = {};        // index -> Uint8Array(数据区)
+var total = null;
+var received = 0;
+var started = false;
+var done = false;
+
+var video = document.getElementById('v');
+var startBtn = document.getElementById('start');
+var statusEl = document.getElementById('status');
+var progressEl = document.getElementById('progress');
+var fileInfoEl = document.getElementById('fileinfo');
+var saveLink = document.getElementById('save');
+var failEl = document.getElementById('fail');
+
+function setStatus(s) { statusEl.textContent = s; }
+
+// ---------- 帧解析 ----------
+// jsQR 返回的 binaryData 可能不是标准 TypedArray, 统一手动读大端字节
+function u32(b, o) { return ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0; }
+function u16(b, o) { return (b[o] << 8) | b[o + 1]; }
+
+function handleFrame(bin) {
+  if (!bin || bin.length < HEADER_LEN || done) return;
+  if (u32(bin, 0) !== MAGIC) return;
+  var t = u16(bin, 4), idx = u16(bin, 6), len = u16(bin, 8);
+  if (bin.length < HEADER_LEN + len) return;
+  var data = new Uint8Array(bin.slice(HEADER_LEN, HEADER_LEN + len));
+  if (crc32(data) !== u32(bin, 10)) return; // 校验失败, 丢弃该帧
+
+  if (total === null) {
+    total = t;
+    progressEl.max = total;
+  }
+  if (t !== total) return;              // 不同文件/不同批次的帧, 忽略
+  if (frames[idx]) return;              // 去重: 循环播放会重复扫到
+  frames[idx] = data;
+  received++;
+  progressEl.value = received;
+  setStatus('接收中 ' + received + '/' + total + ' 帧');
+  if (received >= total) finish();
+}
+
+// ---------- 拼装与下载 ----------
+function finish() {
+  done = true;
+  setStatus('接收完成, 正在保存...');
+  var keys = Object.keys(frames).map(Number).sort(function (a, b) { return a - b; });
+  var parts = [];
+  var fname = 'received.bin';
+  for (var i = 0; i < keys.length; i++) {
+    var d = frames[keys[i]];
+    if (i === 0) {
+      var nl = u16(d, 0);
+      fname = new TextDecoder('utf-8').decode(d.slice(2, 2 + nl));
+      parts.push(d.slice(2 + nl));
+    } else {
+      parts.push(d);
+    }
+  }
+  var blob = new Blob(parts);
+  var url = URL.createObjectURL(blob);
+  saveLink.href = url;
+  saveLink.download = fname;
+  saveLink.style.display = 'block';
+  fileInfoEl.textContent = fname + ' (' + (blob.size / 1024).toFixed(1) + ' KB)';
+  // 尝试自动下载; iOS Safari 可能拦截, 按钮兜底
+  var a = document.createElement('a');
+  a.href = url; a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ---------- 扫码循环 ----------
+function startScan() {
+  if (started) return;
+  started = true;
+  startBtn.disabled = true;
+  setStatus('请求相机权限...');
+  if (navigator.wakeLock && navigator.wakeLock.request) {
+    navigator.wakeLock.request('screen').catch(function () {});
+  }
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false
+  }).then(function (stream) {
+    video.srcObject = stream;
+    video.onloadedmetadata = function () { video.play(); };
+    setStatus('请将二维码对准屏幕中央');
+    var canvas = document.createElement('canvas');
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    function tick() {
+      if (!done && video.readyState >= 2 && video.videoWidth > 0) {
+        var w = 640, h = Math.round(video.videoHeight * 640 / video.videoWidth);
+        canvas.width = w; canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+        var img = ctx.getImageData(0, 0, w, h);
+        var q = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
+        if (q && q.binaryData) handleFrame(q.binaryData);
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }).catch(function (err) {
+    setStatus('相机不可用');
+    failEl.style.display = 'block';
+    failEl.textContent = '无法访问相机 (' + err.name + ')。请确认: 1) 页面是 HTTPS; ' +
+      '2) 已在设置中允许浏览器使用相机; 3) 在 Safari 中打开(微信内无法使用)。';
+    startBtn.disabled = false;
+    started = false;
+  });
+}
+
+startBtn.addEventListener('click', startScan);
+</script>
+</body>
+</html>
