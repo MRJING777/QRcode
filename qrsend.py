@@ -116,12 +116,13 @@ def draw(qr_lines, info_line):
     sys.stdout.flush()
 
 
-def play(frames, fps, fname, receiver, qr_lines_list):
-    """循环播放所有帧,直到 Ctrl-C。"""
+def play(frames, fps, fname):
+    """循环播放所有帧,直到 Ctrl-C。帧即时编码,按下回车后首帧秒出。"""
     total = len(frames)
     try:
         while True:
-            for i, ls in enumerate(qr_lines_list):
+            for i, frame in enumerate(frames):
+                ls = render(qr_for(frame).get_matrix())
                 info = '\033[1m[%d/%d]\033[0m %s  (%d 帧/秒, Ctrl-C 停止)' % (
                     i + 1, total, fname, fps)
                 draw(ls, info)
@@ -177,23 +178,19 @@ def main():
     data = open(args.file, 'rb').read()
     fname = os.path.basename(args.file)
     frames = build_frames(fname, data, chunk)
+    probe = qr_for(frames[0])   # 只编首帧, 用于报告二维码规格
     print('文件: %s (%d 字节), 共 %d 帧, 每帧 %d 字节, 约 %.1f KB/s'
           % (fname, len(data), len(frames), chunk, chunk * args.fps / 1024.0))
-
-    # 编码全部帧
-    print('生成二维码...', end=' ', flush=True)
-    qrs = [qr_for(f) for f in frames]
-    print('完成 (版本 v%d, %dx%d 模块)' % (qrs[0].version, qrs[0].version * 4 + 17,
-                                           qrs[0].version * 4 + 17))
+    print('二维码 v%d (%dx%d 模块), 每轮约 %.0f 秒'
+          % (probe.version, probe.version * 4 + 17, probe.version * 4 + 17,
+             len(frames) / float(args.fps)))
 
     if args.dump:
         os.makedirs(args.dump, exist_ok=True)
-        for i, qr in enumerate(qrs):
-            qr.make_image().save(os.path.join(args.dump, 'frame_%04d.png' % i))
+        for i, frame in enumerate(frames):
+            qr_for(frame).make_image().save(os.path.join(args.dump, 'frame_%04d.png' % i))
         print('帧已导出到 %s (调试模式, 到此结束)' % args.dump)
         sys.exit(0)
-
-    qr_lines_list = [render(q.get_matrix()) for q in qrs]
 
     # 引导码: 手机扫它直达接收页
     guide = qrcode.QRCode(error_correction=ERROR_CORRECT_M, border=2)
@@ -209,7 +206,7 @@ def main():
     input('\033[1m手机准备好后, 回到这里按回车开始播放\033[0m')
     print('(保持接收页在前台, 屏幕调亮; 接收完成后按 Ctrl-C 停止)')
     time.sleep(1)
-    play(frames, args.fps, fname, args.receiver, qr_lines_list)
+    play(frames, args.fps, fname)
 
 
 if __name__ == '__main__':
