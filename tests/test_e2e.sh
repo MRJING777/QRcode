@@ -32,3 +32,11 @@ else
   sha1sum "$T/测试文件.bin" "$T/out.bin"
   exit 1
 fi
+
+# 6. 根目录 index.html 必须与 receiver/index.html 一致 (Pages 部署的是根目录)
+if cmp -s index.html receiver/index.html; then
+  echo "✅ 根目录 index.html 与 receiver/index.html 一致"
+else
+  echo "❌ 根目录 index.html 落后于 receiver/index.html! 执行: cp receiver/index.html ./index.html"
+  exit 1
+fi
