@@ -155,8 +155,8 @@ def main():
                     help='接收页 URL (接收端网页地址)')
     ap.add_argument('--chunk', type=int, default=None,
                     help='每帧数据字节数; 默认按终端窗口大小自动选择')
-    ap.add_argument('--fps', type=int, default=15,
-                    help='播放帧率, 默认 15 (手机相机解码速度有限, 勿设太高)')
+    ap.add_argument('--fps', type=int, default=6,
+                    help='播放帧率, 默认 6 (拍屏有撕裂/摩尔纹, 帧率太高反而识别不了)')
     ap.add_argument('--dump', metavar='DIR', default=None,
                     help='调试用: 把所有帧存成 PNG 到指定目录')
     args = ap.parse_args()

@@ -10248,6 +10248,9 @@ function finish() {
 }
 
 // ---------- 扫码循环 ----------
+var scanCount = 0;      // 已扫描的相机帧数(诊断)
+var lastFoundAt = 0;    // 最近一次识别到二维码的时间(诊断)
+
 function startScan() {
   if (started) return;
   started = true;
@@ -10261,22 +10264,46 @@ function startScan() {
     audio: false
   }).then(function (stream) {
     video.srcObject = stream;
-    video.onloadedmetadata = function () { video.play(); };
-    setStatus('请将二维码对准屏幕中央');
+    video.onloadedmetadata = function () {
+      video.play();
+      // iOS 上允许点击画面触发对焦
+      video.addEventListener('click', function () {
+        var track = stream.getVideoTracks()[0];
+        if (track && track.applyConstraints) {
+          track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] })
+            .catch(function () {});
+        }
+      });
+    };
+    setStatus('请将二维码对准屏幕中央 (可点击画面对焦)');
     var canvas = document.createElement('canvas');
     var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    var scanning = false;
     function tick() {
-      if (!done && video.readyState >= 2 && video.videoWidth > 0) {
-        var w = 640, h = Math.round(video.videoHeight * 640 / video.videoWidth);
+      // 节流: jsQR 跑完当前帧后才取下一帧, 避免堆积
+      if (!scanning && !done && video.readyState >= 2 && video.videoWidth > 0) {
+        scanning = true;
+        var w = 960, h = Math.round(video.videoHeight * 960 / video.videoWidth);
         canvas.width = w; canvas.height = h;
         ctx.drawImage(video, 0, 0, w, h);
         var img = ctx.getImageData(0, 0, w, h);
-        // 终端渲染的是黑底白码, 首试反转方向; jsQR 1.4 的 onlyInvert 有 bug, 用 invertFirst
+        scanCount++;
         var q = jsQR(img.data, w, h, { inversionAttempts: 'invertFirst' });
-        if (q && q.binaryData) handleFrame(q.binaryData);
+        if (q && q.binaryData) {
+          lastFoundAt = Date.now();
+          handleFrame(q.binaryData);
+        }
+        scanning = false;
       }
       requestAnimationFrame(tick);
     }
+    setInterval(function () {
+      if (!done && total === null && scanCount > 10) {
+        var idle = Math.round((Date.now() - lastFoundAt) / 1000);
+        setStatus('扫描中 (' + scanCount + ' 帧' +
+                  (lastFoundAt ? ', 上次识别到码 ' + idle + ' 秒前' : ', 尚未识别到二维码') + ')');
+      }
+    }, 1500);
     requestAnimationFrame(tick);
   }).catch(function (err) {
     setStatus('相机不可用');
